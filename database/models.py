@@ -117,11 +117,10 @@ def get_flota_status():
         if actual:
             c["viaje_actual"] = dict(actual)
             
-        # Viaje pendiente
-        cursor.execute("SELECT id, origen, destino, cliente, created_at FROM viajes WHERE chofer_id = ? AND estado = 'Pendiente' ORDER BY created_at ASC LIMIT 1", (c["id"],))
-        pendiente = cursor.fetchone()
-        if pendiente:
-            c["viaje_pendiente"] = dict(pendiente)
+        # Viajes pendientes (Lista)
+        cursor.execute("SELECT id, origen, destino, cliente, created_at FROM viajes WHERE chofer_id = ? AND estado = 'Pendiente' ORDER BY orden ASC, created_at ASC", (c["id"],))
+        pendientes = cursor.fetchall()
+        c["viajes_pendientes"] = [dict(p) for p in pendientes]
             
     conn.close()
     return choferes
@@ -129,7 +128,7 @@ def get_flota_status():
 
 def create_viaje(operador_id: int, chofer_id: int, origen: str, destino: str, cliente: str):
     """
-    Crea un viaje nuevo.
+    Crea un viaje nuevo. Destino puede ser vacío.
     Si el chofer ya está en viaje, el nuevo pasa a 'Pendiente'.
     """
     conn = get_connection()
@@ -148,11 +147,16 @@ def create_viaje(operador_id: int, chofer_id: int, origen: str, destino: str, cl
     conn.close()
 
 
-def finalizar_viaje(viaje_id: int, monto: float):
-    """Marca un viaje como finalizado y le asigna el monto cobrado."""
+def finalizar_viaje(viaje_id: int, monto: float, metodo_pago: str, cliente_nombre: str = None, observaciones: str = None):
+    """Marca un viaje como finalizado y le asigna el monto, método de pago, cliente y observaciones."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE viajes SET estado = 'Finalizado', monto = ? WHERE id = ?", (monto, viaje_id))
+    
+    if cliente_nombre is not None:
+        cursor.execute("UPDATE viajes SET estado = 'Finalizado', monto = ?, metodo_pago = ?, cliente = ?, observaciones = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", (monto, metodo_pago, cliente_nombre, observaciones, viaje_id))
+    else:
+        cursor.execute("UPDATE viajes SET estado = 'Finalizado', monto = ?, metodo_pago = ?, observaciones = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", (monto, metodo_pago, observaciones, viaje_id))
+        
     conn.commit()
     conn.close()
 
@@ -169,6 +173,92 @@ def cancelar_viaje(viaje_id: int):
     """Cancela un viaje (queda en el historial)."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE viajes SET estado = 'Cancelado' WHERE id = ?", (viaje_id,))
+    cursor.execute("UPDATE viajes SET estado = 'Cancelado', updated_at = datetime('now', 'localtime') WHERE id = ?", (viaje_id,))
     conn.commit()
     conn.close()
+
+def edit_destino(viaje_id: int, destino: str):
+    """Permite editar el destino de un viaje activo o pendiente."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE viajes SET destino = ? WHERE id = ?", (destino, viaje_id))
+    conn.commit()
+    conn.close()
+
+def priorizar_viaje(viaje_id: int):
+    """Pone un viaje pendiente como el primero en la cola (orden = -1, o se resta 1 al menor)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE viajes SET orden = orden - 1 WHERE id = ?", (viaje_id,))
+    conn.commit()
+    conn.close()
+
+def get_historial():
+    """Devuelve los viajes finalizados y cancelados, ordenados por los más recientes."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = """
+        SELECT v.id, v.origen, v.destino, v.cliente, v.monto, v.metodo_pago, v.estado, v.updated_at, v.observaciones,
+               c.nombre as chofer_nombre, c.movil as chofer_movil,
+               o.nombre as operador_nombre
+        FROM viajes v
+        JOIN choferes c ON v.chofer_id = c.id
+        JOIN operadores o ON v.operador_id = o.id
+        WHERE v.estado IN ('Finalizado', 'Cancelado')
+        ORDER BY v.updated_at DESC
+        LIMIT 100
+    """
+    cursor.execute(query)
+    historial = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return historial
+
+def delete_viaje_historial(viaje_id: int):
+    """Elimina permanentemente un viaje de la base de datos (usado para limpiar pruebas)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM viajes WHERE id = ?", (viaje_id,))
+    conn.commit()
+    conn.close()
+
+def get_daily_stats():
+    """Calcula las estadísticas del turno/día actual."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    # Solo viajes finalizados hoy
+    query = """
+        SELECT metodo_pago, sum(monto) as total_monto, count(id) as total_viajes 
+        FROM viajes 
+        WHERE estado = 'Finalizado' 
+          AND date(updated_at) = date('now', 'localtime')
+        GROUP BY metodo_pago
+    """
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    
+    stats = {
+        "viajes_hechos": 0,
+        "efectivo": 0.0,
+        "transferencia": 0.0,
+        "fiados": 0.0,
+        "neto": 0.0
+    }
+    
+    for r in rows:
+        metodo = r["metodo_pago"]
+        monto = r["total_monto"] or 0.0
+        cantidad = r["total_viajes"] or 0
+        
+        stats["viajes_hechos"] += cantidad
+        
+        if metodo == "Efectivo":
+            stats["efectivo"] += monto
+            stats["neto"] += monto
+        elif metodo == "Transferencia":
+            stats["transferencia"] += monto
+            stats["neto"] += monto
+        elif metodo == "Cuenta Corriente":
+            stats["fiados"] += monto
+            
+    conn.close()
+    return stats

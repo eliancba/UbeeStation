@@ -56,16 +56,38 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 operador_id INTEGER,
                 chofer_id INTEGER,
-                estado TEXT DEFAULT 'Pendiente', 
                 origen TEXT NOT NULL,
-                destino TEXT NOT NULL,
+                destino TEXT,
                 cliente TEXT,
                 monto REAL,
-                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                estado TEXT DEFAULT 'Pendiente',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(operador_id) REFERENCES operadores(id),
                 FOREIGN KEY(chofer_id) REFERENCES choferes(id)
             )
         """)
+
+        # 1.c Actualizaciones de esquema para Fase 5
+        try:
+            cursor.execute("ALTER TABLE viajes ADD COLUMN metodo_pago TEXT")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE viajes ADD COLUMN orden INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE viajes ADD COLUMN updated_at TEXT")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE viajes ADD COLUMN observaciones TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         conn.commit()
         conn.close()

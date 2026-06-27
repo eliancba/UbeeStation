@@ -3,10 +3,15 @@ Ventana principal de UBEEstation con Sidebar Layout.
 """
 
 import customtkinter as ctk
-from config.settings import APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT
+import shutil
+import os
+from datetime import datetime
+from config.settings import APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT, DB_PATH
 from views.choferes_view import ChoferesView
 from views.despacho_view import DespachoView
+from views.historial_view import HistorialView
 from database import models
+from PIL import Image
 
 
 class MainWindow(ctk.CTk):
@@ -46,13 +51,27 @@ class MainWindow(ctk.CTk):
         # --- Sidebar ---
         self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(5, weight=1) # Espacio vacío abajo
+        self.sidebar_frame.grid_rowconfigure(6, weight=1) # Espacio vacío abajo
 
-        self.logo_label = ctk.CTkLabel(
-            self.sidebar_frame, 
-            text=f"🐝 {APP_NAME}", 
-            font=ctk.CTkFont(size=20, weight="bold")
-        )
+        # --- Logo ---
+        assets_dir = os.path.join(os.path.dirname(DB_PATH), "assets")
+        logo_path = None
+        for ext in ["png", "jpg", "jpeg"]:
+            temp_path = os.path.join(assets_dir, f"logo.{ext}")
+            if os.path.exists(temp_path):
+                logo_path = temp_path
+                break
+                
+        if logo_path:
+            try:
+                img_data = Image.open(logo_path)
+                logo_img = ctk.CTkImage(light_image=img_data, dark_image=img_data, size=(120, 120))
+                self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="", image=logo_img)
+            except Exception:
+                self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=f"🐝 {APP_NAME}", font=ctk.CTkFont(size=20, weight="bold"))
+        else:
+            self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=f"🐝 {APP_NAME}", font=ctk.CTkFont(size=20, weight="bold"))
+            
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
         # --- Selector de Operador ---
@@ -87,21 +106,32 @@ class MainWindow(ctk.CTk):
         self.btn_despacho.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
         self.sidebar_btns["despacho"] = self.btn_despacho
 
-        self.btn_viajes = ctk.CTkButton(
-            self.sidebar_frame, text="Viajes", anchor="w",
-            command=lambda: self.show_view("viajes"),
-            fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30")
-        )
-        self.btn_viajes.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
-        self.sidebar_btns["viajes"] = self.btn_viajes
-
         self.btn_choferes = ctk.CTkButton(
             self.sidebar_frame, text="Choferes", anchor="w",
             command=lambda: self.show_view("choferes"),
             fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30")
         )
-        self.btn_choferes.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
+        self.btn_choferes.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
         self.sidebar_btns["choferes"] = self.btn_choferes
+
+        self.btn_historial = ctk.CTkButton(
+            self.sidebar_frame, text="Historial", anchor="w",
+            command=lambda: self.show_view("historial"),
+            fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30")
+        )
+        self.btn_historial.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
+        self.sidebar_btns["historial"] = self.btn_historial
+
+        # --- Botón de Backup (abajo del todo) ---
+        self.backup_label = ctk.CTkLabel(self.sidebar_frame, text="", font=ctk.CTkFont(size=11))
+        self.backup_label.grid(row=7, column=0, padx=10, pady=(0, 5))
+
+        self.btn_backup = ctk.CTkButton(
+            self.sidebar_frame, text="💾 Copia de Seguridad",
+            fg_color="#34495e", hover_color="#2c3e50",
+            command=self._on_backup
+        )
+        self.btn_backup.grid(row=8, column=0, padx=10, pady=(0, 15), sticky="ew")
 
 
         # --- Contenedor Principal ---
@@ -127,9 +157,9 @@ class MainWindow(ctk.CTk):
         )
         self.views["despacho"].grid(row=0, column=0, sticky="nsew")
 
-        # Placeholder para Viajes
-        self.views["viajes"] = self._create_placeholder("Gestión de Viajes\n(Fase 3)")
-        self.views["viajes"].grid(row=0, column=0, sticky="nsew")
+        # Instanciamos la vista de Historial
+        self.views["historial"] = HistorialView(self.main_content_frame, fg_color="transparent")
+        self.views["historial"].grid(row=0, column=0, sticky="nsew")
 
     def _create_placeholder(self, text):
         """Crea una vista temporal para las secciones no implementadas."""
@@ -155,6 +185,8 @@ class MainWindow(ctk.CTk):
                 self.views["choferes"].load_choferes()
             elif view_name == "despacho":
                 self.views["despacho"].load_data()
+            elif view_name == "historial":
+                self.views["historial"].load_data()
 
         # 2. Actualizar estilos de los botones (marcar el activo)
         for name, btn in self.sidebar_btns.items():
@@ -191,3 +223,22 @@ class MainWindow(ctk.CTk):
             self._load_operadores()
             self.operador_var.set(nombre.strip())
 
+    # --- Copia de Seguridad ---
+
+    def _on_backup(self):
+        """Crea una copia del archivo SQLite en la carpeta /backups."""
+        try:
+            # Crear carpeta backups si no existe
+            backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+
+            # Nombre con timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            backup_name = f"ubeestation_{timestamp}.db"
+            backup_path = os.path.join(backup_dir, backup_name)
+
+            shutil.copy2(DB_PATH, backup_path)
+
+            self.backup_label.configure(text=f"✅ Backup OK ({timestamp})", text_color="#2ecc71")
+        except Exception as e:
+            self.backup_label.configure(text=f"❌ Error: {e}", text_color="#e74c3c")
