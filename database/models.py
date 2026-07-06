@@ -221,19 +221,31 @@ def delete_viaje_historial(viaje_id: int):
     conn.commit()
     conn.close()
 
-def get_daily_stats():
-    """Calcula las estadísticas del turno/día actual."""
+def get_daily_stats(chofer_id: int = None):
+    """Calcula las estadísticas del turno/día actual, opcionalmente filtradas por chofer."""
     conn = get_connection()
     cursor = conn.cursor()
-    # Solo viajes finalizados hoy
-    query = """
-        SELECT metodo_pago, sum(monto) as total_monto, count(id) as total_viajes 
-        FROM viajes 
-        WHERE estado = 'Finalizado' 
-          AND date(updated_at) = date('now', 'localtime')
-        GROUP BY metodo_pago
-    """
-    cursor.execute(query)
+    
+    if chofer_id:
+        query = """
+            SELECT metodo_pago, sum(monto) as total_monto, count(id) as total_viajes 
+            FROM viajes 
+            WHERE estado = 'Finalizado' 
+              AND date(updated_at) = date('now', 'localtime')
+              AND chofer_id = ?
+            GROUP BY metodo_pago
+        """
+        cursor.execute(query, (chofer_id,))
+    else:
+        query = """
+            SELECT metodo_pago, sum(monto) as total_monto, count(id) as total_viajes 
+            FROM viajes 
+            WHERE estado = 'Finalizado' 
+              AND date(updated_at) = date('now', 'localtime')
+            GROUP BY metodo_pago
+        """
+        cursor.execute(query)
+        
     rows = cursor.fetchall()
     
     stats = {
@@ -262,3 +274,28 @@ def get_daily_stats():
             
     conn.close()
     return stats
+
+def get_viajes_hoy(chofer_id: int = None):
+    """Obtiene los viajes (Finalizados o Cancelados) del día actual."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    base_query = """
+        SELECT v.id, v.origen, v.destino, v.monto, v.metodo_pago, v.estado, v.updated_at,
+               c.nombre as chofer_nombre, c.movil as chofer_movil
+        FROM viajes v
+        JOIN choferes c ON v.chofer_id = c.id
+        WHERE v.estado IN ('Finalizado', 'Cancelado')
+          AND date(v.updated_at) = date('now', 'localtime')
+    """
+    
+    if chofer_id:
+        base_query += " AND v.chofer_id = ? ORDER BY v.updated_at DESC"
+        cursor.execute(base_query, (chofer_id,))
+    else:
+        base_query += " ORDER BY v.updated_at DESC"
+        cursor.execute(base_query)
+        
+    viajes = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return viajes

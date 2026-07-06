@@ -10,8 +10,10 @@ from config.settings import APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT, 
 from views.choferes_view import ChoferesView
 from views.despacho_view import DespachoView
 from views.historial_view import HistorialView
+from views.insights_view import InsightsView
 from database import models
 from PIL import Image
+import tkinter.messagebox as messagebox
 
 
 class MainWindow(ctk.CTk):
@@ -26,6 +28,9 @@ class MainWindow(ctk.CTk):
         self._center_window()
         self._build_layout()
         self._init_views()
+        
+        # Confirmación de salida
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
         
         # Mostramos una vista por defecto. Si la DB falló, mostramos un error.
         if not db_status:
@@ -72,11 +77,15 @@ class MainWindow(ctk.CTk):
         else:
             self.logo_label = ctk.CTkLabel(self.sidebar_frame, text=f"🐝 {APP_NAME}", font=ctk.CTkFont(size=20, weight="bold"))
             
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 5))
+
+        # --- Reloj ---
+        self.lbl_reloj = ctk.CTkLabel(self.sidebar_frame, text="--:--", font=ctk.CTkFont(size=22, weight="bold"), text_color="#3498db")
+        self.lbl_reloj.grid(row=1, column=0, padx=20, pady=(0, 20))
 
         # --- Selector de Operador ---
         self.operador_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.operador_frame.grid(row=1, column=0, padx=10, pady=(0, 20), sticky="ew")
+        self.operador_frame.grid(row=2, column=0, padx=10, pady=(0, 20), sticky="ew")
         self.operador_frame.grid_columnconfigure(0, weight=1)
 
         self.operador_var = ctk.StringVar(value="Operador...")
@@ -103,15 +112,23 @@ class MainWindow(ctk.CTk):
             command=lambda: self.show_view("despacho"),
             fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30")
         )
-        self.btn_despacho.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        self.btn_despacho.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
         self.sidebar_btns["despacho"] = self.btn_despacho
+        
+        self.btn_insights = ctk.CTkButton(
+            self.sidebar_frame, text="Resumen", anchor="w",
+            command=lambda: self.show_view("insights"),
+            fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30")
+        )
+        self.btn_insights.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
+        self.sidebar_btns["insights"] = self.btn_insights
 
         self.btn_choferes = ctk.CTkButton(
             self.sidebar_frame, text="Choferes", anchor="w",
             command=lambda: self.show_view("choferes"),
             fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30")
         )
-        self.btn_choferes.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
+        self.btn_choferes.grid(row=5, column=0, padx=10, pady=5, sticky="ew")
         self.sidebar_btns["choferes"] = self.btn_choferes
 
         self.btn_historial = ctk.CTkButton(
@@ -119,19 +136,19 @@ class MainWindow(ctk.CTk):
             command=lambda: self.show_view("historial"),
             fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30")
         )
-        self.btn_historial.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
+        self.btn_historial.grid(row=6, column=0, padx=10, pady=5, sticky="ew")
         self.sidebar_btns["historial"] = self.btn_historial
 
         # --- Botón de Backup (abajo del todo) ---
         self.backup_label = ctk.CTkLabel(self.sidebar_frame, text="", font=ctk.CTkFont(size=11))
-        self.backup_label.grid(row=7, column=0, padx=10, pady=(0, 5))
+        self.backup_label.grid(row=8, column=0, padx=10, pady=(0, 5))
 
         self.btn_backup = ctk.CTkButton(
             self.sidebar_frame, text="💾 Copia de Seguridad",
             fg_color="#34495e", hover_color="#2c3e50",
             command=self._on_backup
         )
-        self.btn_backup.grid(row=8, column=0, padx=10, pady=(0, 15), sticky="ew")
+        self.btn_backup.grid(row=9, column=0, padx=10, pady=(0, 15), sticky="ew")
 
 
         # --- Contenedor Principal ---
@@ -160,6 +177,18 @@ class MainWindow(ctk.CTk):
         # Instanciamos la vista de Historial
         self.views["historial"] = HistorialView(self.main_content_frame, fg_color="transparent")
         self.views["historial"].grid(row=0, column=0, sticky="nsew")
+        
+        # Instanciamos la vista de Insights
+        self.views["insights"] = InsightsView(self.main_content_frame, fg_color="transparent")
+        self.views["insights"].grid(row=0, column=0, sticky="nsew")
+        
+        self._update_clock()
+
+    def _update_clock(self):
+        ahora = datetime.now()
+        fecha_hora_str = ahora.strftime("%d/%m/%Y\n%H:%M:%S")
+        self.lbl_reloj.configure(text=fecha_hora_str)
+        self.after(1000, self._update_clock)
 
     def _create_placeholder(self, text):
         """Crea una vista temporal para las secciones no implementadas."""
@@ -187,6 +216,8 @@ class MainWindow(ctk.CTk):
                 self.views["despacho"].load_data()
             elif view_name == "historial":
                 self.views["historial"].load_data()
+            elif view_name == "insights":
+                self.views["insights"].load_data()
 
         # 2. Actualizar estilos de los botones (marcar el activo)
         for name, btn in self.sidebar_btns.items():
@@ -242,3 +273,11 @@ class MainWindow(ctk.CTk):
             self.backup_label.configure(text=f"✅ Backup OK ({timestamp})", text_color="#2ecc71")
         except Exception as e:
             self.backup_label.configure(text=f"❌ Error: {e}", text_color="#e74c3c")
+
+    def _on_closing(self):
+        """Intercepta el evento de cerrar la ventana para preguntar y hacer backup."""
+        if messagebox.askyesno("Cerrar UBEEstation", "¿Desea cerrar el sistema?"):
+            if messagebox.askyesno("Copia de Seguridad", "¿Desea crear una copia de seguridad de la base de datos antes de salir?"):
+                self._on_backup()
+                messagebox.showinfo("Éxito", "Copia de seguridad creada correctamente.")
+            self.destroy()
